@@ -7,18 +7,25 @@
 cSolver::cSolver() {
 }
 
-void cSolver::calib(std::vector<cSynchronizer::sync_data> &calib_data, int outliers_iterations) {
+void cSolver::calib(std::vector<cSynchronizer::sync_data> &calib_data,
+                    int outliers_iterations)  //
+{
   std::vector<cSynchronizer::sync_data> calib_history[outliers_iterations + 1];
   calib_result res;
 
-  for (int iteration = 0; iteration <= outliers_iterations; iteration++) {
+  // 固定次数的迭代
+  for (int iteration = 0; iteration <= outliers_iterations; iteration++)  //
+  {
     calib_history[iteration] = calib_data;
 
     // Calibration
-    if (!solve(calib_data, 0, 75, res)) {
+    if (!solve(calib_data, 0, 75, res))  //
+    {
       std::cout << colouredString("Failed calibration.", RED, BOLD) << std::endl;
       continue;
-    } else {
+    }     //
+    else  //
+    {
       std::cout << '\n'
                 << "-------Calibration Results-------" << '\n'
                 << "Axle between wheels: " << res.axle << '\n'
@@ -81,7 +88,7 @@ void cSolver::calib(std::vector<cSynchronizer::sync_data> &calib_data, int outli
     }
 
     calib_data = n;
-  }
+  }  // 完成固定次数的迭代(4次)
 
   double laser_std_x, laser_std_y, laser_std_th;
   int estimate_with = 1;
@@ -123,13 +130,16 @@ void cSolver::calib(std::vector<cSynchronizer::sync_data> &calib_data, int outli
 }
 
 bool cSolver::solve(const std::vector<cSynchronizer::sync_data> &calib_data,
-                    int mode, double max_cond_number, calib_result &res) {
+                    int mode,
+                    double max_cond_number,
+                    calib_result &res)  //
+{
   /*!<!--####################		FIRST STEP: estimate J21 and J22  	#################-->*/
   double J21, J22;
 
   Eigen::Matrix2d A   = Eigen::Matrix2d::Zero();
-  Eigen::Vector2d g   = Eigen::Vector2d::Zero();
-  Eigen::Vector2d L_i = Eigen::Vector2d::Zero();
+  Eigen::Vector2d g   = Eigen::Vector2d::Zero();  // 2x1 列向量
+  Eigen::Vector2d L_i = Eigen::Vector2d::Zero();  // 2x1 列向量
 
   //  std::cout << "A: " << A << ' ' << "g: " << g << std::endl;
   //  std::cout << "orz.." << std::endl;
@@ -140,16 +150,22 @@ bool cSolver::solve(const std::vector<cSynchronizer::sync_data> &calib_data,
   for (int i = 0; i < n; i++) {
     const cSynchronizer::sync_data &t = calib_data[i];
 
-    L_i(0) = t.T * t.velocity_left; // 时间*左轮速=Δ左
-    L_i(1) = t.T * t.velocity_right;  // 世界*右轮速=Δ右
+    L_i(0) = t.T * t.velocity_left;   // 时间*左轮角速度=Δ左，单位 rad
+    L_i(1) = t.T * t.velocity_right;  // 时间*右轮角速度=Δ右，单位 rad
     //    std::cout << (L_i * L_i.transpose()) << '\n' << std::endl;
-    A = A + (L_i * L_i.transpose());          // A = A + L_i'*L_i;  A symmetric
-                                              //    std::cout << (t.scan_match_results[2] * L_i) << std::endl;
+
+    // Σ L^T*L
+    // A 是一个 2x2 矩阵
+    A = A + (L_i * L_i.transpose());  // A = A + L_i'*L_i;  A symmetric
+                                      //    std::cout << (t.scan_match_results[2] * L_i) << std::endl;
+
+    // Σ S_θ * L^T
+    // g 是一个 2x1 列向量
     g = (t.scan_match_results[2] * L_i) + g;  // g = g + L_i'*y_i;  sm :{x , y, theta}
                                               //    std::cout << "A: " << A << ' ' << "g: " << g << std::endl;
   }
 
-  // A 非奇异
+  // 验证 A 非奇异
   // Verify that A isn't singular
   Eigen::JacobiSVD<Eigen::MatrixXd> svd(A);
   double cond = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size() - 1);
@@ -165,6 +181,9 @@ bool cSolver::solve(const std::vector<cSynchronizer::sync_data> &calib_data,
 
   std::cout << "J: " << y << std::endl;
 
+  // 解得 J21 J22
+  // J21 = - rL/b
+  // J22 =  rR/b
   J21 = y(0);
   J22 = y(1);
 
@@ -184,10 +203,14 @@ bool cSolver::solve(const std::vector<cSynchronizer::sync_data> &calib_data,
   double sm[3];
 
   int nused = 0;
-  for (int k = 0; k < n; k++) {
+  // 遍历所有 数据，组成 Q
+  for (int k = 0; k < n; k++)  //
+  {
     const cSynchronizer::sync_data &t = calib_data[k];
-    o_theta                           = t.T * (J21 * t.velocity_left + J22 * t.velocity_right);
-    w0                                = o_theta / t.T;
+    // odom 得到的 theta (rad)
+    o_theta = t.T * (J21 * t.velocity_left + J22 * t.velocity_right);
+    // odom 得到的 角速度 ω (rad/s)
+    w0 = o_theta / t.T;
 
     if (fabs(o_theta) > 1e-12) {
       t1 = sin(o_theta) / o_theta;
@@ -202,23 +225,52 @@ bool cSolver::solve(const std::vector<cSynchronizer::sync_data> &calib_data,
     cy1 = 0.5 * t.T * (-J21 * t.velocity_left) * t2;
     cy2 = 0.5 * t.T * (J22 * t.velocity_right) * t2;
 
-    if ((mode == 0) || (mode == 1)) {
+    if ((mode == 0) || (mode == 1))  //
+    {
       cx = cx1 + cx2;
       cy = cy1 + cy2;
-      L_k << -cx, (1 - cos(o_theta)), sin(o_theta), t.scan_match_results[0], -t.scan_match_results[1],
-          -cy, -sin(o_theta), (1 - cos(o_theta)), t.scan_match_results[1], t.scan_match_results[0];
+
+      // 论文中的 2x5 矩阵 Qk
+      L_k << -cx,
+          (1 - cos(o_theta)),
+          sin(o_theta),
+          t.scan_match_results[0],
+          -t.scan_match_results[1],
+
+          -cy,
+          -sin(o_theta),
+          (1 - cos(o_theta)),
+          t.scan_match_results[1],
+          t.scan_match_results[0];
+
       // M = M + L_k' * L_k; M is symmetric
+      // M 为 5x5 矩阵
       M = M + L_k.transpose() * L_k;
-    } else {
-      L_2k << -cx1, -cx2, (1 - cos(o_theta)), sin(o_theta), t.scan_match_results[0], -t.scan_match_results[1],
-          -cy1, -cy2, -sin(o_theta), (1 - cos(o_theta)), t.scan_match_results[1], t.scan_match_results[0];
+    }     //
+    else  //
+    {
+      L_2k << -cx1,
+          -cx2,
+          (1 - cos(o_theta)),
+          sin(o_theta),
+          t.scan_match_results[0],
+          -t.scan_match_results[1],
+
+          -cy1,
+          -cy2,
+          -sin(o_theta),
+          (1 - cos(o_theta)),
+          t.scan_match_results[1],
+          t.scan_match_results[0];
+
       M2 = M2 + L_2k.transpose() * L_2k;
     }
-  }
+  }  // 完成遍历所有数据
 
   double est_b, est_d_l, est_d_r, laser_x, laser_y, laser_th;
   Eigen::VectorXd x;
-  switch (mode) {
+  switch (mode)  //
+  {
     case 0: {
       x = full_calibration_min(M);
 
@@ -233,6 +285,7 @@ bool cSolver::solve(const std::vector<cSynchronizer::sync_data> &calib_data,
     default:
       break;
   }
+
   res.axle     = est_b;
   res.radius_l = est_d_l / 2;
   res.radius_r = est_d_r / 2;
@@ -261,7 +314,8 @@ Eigen::VectorXd cSolver::full_calibration_min(const Eigen::MatrixXd &M) {
   c = -2 * m13 * pow(m35, 3) * m15 - m22 * pow(m13, 2) * pow(m44, 2) + m11 * pow(m22, 2) * pow(m44, 2) + pow(m13, 2) * pow(m35, 2) * m44 + 2 * m13 * m22 * m34 * m14 * m44 + pow(m13, 2) * pow(m34, 2) * m44 - 2 * m11 * m22 * pow(m34, 2) * m44 - 2 * m13 * pow(m34, 3) * m14 - 2 * m11 * m22 * pow(m35, 2) * m44 + 2 * m11 * pow(m35, 2) * pow(m34, 2) + m22 * pow(m14, 2) * pow(m35, 2) - 2 * m13 * pow(m35, 2) * m34 * m14 - 2 * m13 * pow(m34, 2) * m35 * m15 + m11 * pow(m34, 4) + m22 * pow(m15, 2) * pow(m34, 2) + m22 * pow(m35, 2) * pow(m15, 2) + m11 * pow(m35, 4) - pow(m22, 2) * pow(m14, 2) * m44 + 2 * m13 * m22 * m35 * m15 * m44 + m22 * pow(m34, 2) * pow(m14, 2) - pow(m22, 2) * pow(m15, 2) * m44;
 
   /* 	Calcolo radice del polinomio 	*/
-  if ((pow(b, 2) - 4 * a * c) >= 0) {
+  if ((pow(b, 2) - 4 * a * c) >= 0) //
+  {
     double r0 = (-b - sqrt(pow(b, 2) - 4 * a * c)) / (2 * a);
     double r1 = (-b + sqrt(pow(b, 2) - 4 * a * c)) / (2 * a);
 
@@ -275,7 +329,8 @@ Eigen::VectorXd cSolver::full_calibration_min(const Eigen::MatrixXd &M) {
     double e1 = calculate_error(x1, M);
 
     return e0 < e1 ? x0 : x1;
-  } else {
+  } //
+  else {
     std::cout << colouredString("Imaginary solution!", RED, BOLD) << std::endl;
     return Eigen::VectorXd(5);
   }
@@ -339,7 +394,10 @@ Eigen::VectorXd cSolver::x_given_lambda(const Eigen::MatrixXd &M, const double &
   return v0;
 }
 
-void cSolver::compute_disagreement(cSynchronizer::sync_data &calib_data, const calib_result &res) {
+void cSolver::compute_disagreement(
+    cSynchronizer::sync_data &calib_data,
+    const calib_result &res)  //
+{
   double J11 = res.radius_l / 2;
   double J12 = res.radius_r / 2;
   double J21 = -res.radius_l / res.axle;
